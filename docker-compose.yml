@@ -1,0 +1,131 @@
+version: '3.6'
+services:
+  zoo1:
+    image: zookeeper:$ZOOKEEPER_VERSION
+    environment:
+      ZOO_MY_ID: 1
+      ZOO_SERVERS: server.1=0.0.0.0:2888:3888 server.2=zoo2:2888:3888 server.3=zoo3:2888:3888
+    ports:
+      - 2181:2181
+    networks:
+      - mesos-network
+    volumes:
+      - ./data/zoo1/:/data/
+  zoo2:
+    image: zookeeper:$ZOOKEEPER_VERSION
+    environment:
+      ZOO_MY_ID: 2
+      ZOO_SERVERS: server.1=zoo1:2888:3888 server.2=0.0.0.0:2888:3888 server.3=zoo3:2888:3888
+    ports:
+      - 2182:2181
+    networks:
+      - mesos-network
+    volumes:
+      - ./data/zoo2:/data
+  zoo3:
+    image: zookeeper:$ZOOKEEPER_VERSION
+    environment:
+      ZOO_MY_ID: 3
+      ZOO_SERVERS: server.1=zoo1:2888:3888 server.2=zoo2:2888:3888 server.3=0.0.0.0:2888:3888
+    ports:
+      - 2183:2181
+    networks:
+      - mesos-network
+    volumes:
+      - ./data/zoo3:/data
+  mesos-master:
+    image: mesosphere/mesos-master:$MESOS_VERSION
+    depends_on:
+      - zoo1
+      - zoo2
+      - zoo3
+    environment:
+      MESOS_PORT: 5050
+      MESOS_ZK: zk://zoo1:2181,zoo2:2181,zoo3:2181/mesos
+      MESOS_QUORUM: 1
+      MESOS_REGISTRY: in_memory
+      MESOS_LOG_DIR: /var/log/mesos
+      MESOS_WORK_DIR: /var/tmp/mesos
+    volumes:
+      - ./data/mesos_master/work_dir:/var/tmp/mesos
+      - ./data/mesos_master/log_dir:/var/log/mesos
+    ports:
+      - 5050:5050
+    networks:
+      - mesos-network
+  mesos-slave1:
+    image: mesosphere/mesos-slave:$MESOS_VERSION
+    depends_on:
+      - mesos-master
+    ports:
+      - 5051:5051
+    privileged: true
+    environment:
+      MESOS_PORT: 5051
+      MESOS_MASTER: zk://zoo1:2181,zoo2:2181,zoo3:2181/mesos
+      MESOS_SWITCH_USER: 0
+      MESOS_CONTAINERIZERS: docker,mesos
+      # MESOS_ISOLATOR: cgroups/cpu,cgroups/mem
+      MESOS_SYSTEMD_ENABLE_SUPPORT: 'false'
+      MESOS_LOG_DIR: /var/log/mesos
+      MESOS_WORK_DIR: /var/tmp/mesos
+      MESOS_LOGGING_LEVEL: INFO
+    volumes:
+      - ./data/mesos_slave1/work_dir:/var/tmp/mesos
+      - ./data/mesos_slave1/log_dir:/var/log/mesos
+      - ./data:/data
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      # - /cgroup:/cgroup
+      # - /sys:/sys
+      # - /usr/local/bin/docker:/usr/local/bin/docker
+    networks:
+      - mesos-network
+  mesos-slave2:
+    image: mesosphere/mesos-slave:$MESOS_VERSION
+    depends_on:
+      - mesos-master
+    ports:
+      - 5052:5051
+    privileged: true
+    environment:
+      MESOS_PORT: 5051
+      MESOS_MASTER: zk://zoo1:2181,zoo2:2181,zoo3:2181/mesos
+      MESOS_SWITCH_USER: 0
+      MESOS_CONTAINERIZERS: docker,mesos
+      # MESOS_ISOLATOR: cgroups/cpu,cgroups/mem
+      MESOS_SYSTEMD_ENABLE_SUPPORT: 'false'
+      MESOS_LOG_DIR: /var/log/mesos
+      MESOS_WORK_DIR: /var/tmp/mesos
+      MESOS_LOGGING_LEVEL: INFO
+    volumes:
+      - ./data/mesos_slave2/work_dir:/var/tmp/mesos
+      - ./data/mesos_slave2/log_dir:/var/log/mesos
+      - ./data:/data
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      # - /cgroup:/cgroup
+      # - /sys:/sys
+      # - /usr/local/bin/docker:/usr/local/bin/docker
+    networks:
+      - mesos-network
+  marathon:
+    image: mesosphere/marathon:$MARATHON_VERSION
+    depends_on:
+      - zoo1
+      - zoo2
+      - zoo3
+      - mesos-master
+    command: --master zk://zoo1:2181,zoo2:2181,zoo3:2181/mesos --zk zk://zoo1:2181,zoo2:2181,zoo3:2181/marathon
+    ports:
+      - 8080:8080
+    networks:
+      - mesos-network
+  chronos:
+    image: mesosphere/chronos:$CHRONOS_VERSION
+    command: --master zk://zoo1:2181,zoo2:2181,zoo3:2181/mesos --zk_hosts zk://zoo1:2181,zoo2:2181,zoo3:2181/marathon
+    networks:
+      - mesos-network
+networks:
+  mesos-network:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
